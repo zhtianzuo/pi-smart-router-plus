@@ -2,7 +2,10 @@ import {
   DEFAULT_HISTORY_LIMIT,
   MAX_HISTORY_LIMIT,
   aggregateSessionStatsFromFleet,
+  DEFAULT_PLUS_CONFIG,
   DEFAULT_TELEMETRY_CONTRIB_EXPORT_LIMIT,
+  formatPlusStatus,
+  formatRiskReport,
   parseExportTelemetryContribArgs,
 } from '../../../src/index.js';
 import type {
@@ -201,7 +204,34 @@ export function parseSmartRouterArgs(args: string): ParsedSmartRouterCommand {
     return { command: 'unpin' };
   }
 
+  if (tokens[0] === 'plus-status' && tokens.length === 1) {
+    return { command: 'plus-status' };
+  }
+
+  if (tokens[0] === 'risk' && tokens.length === 1) {
+    return { command: 'risk' };
+  }
+
   throw new Error(`Usage: ${SMART_ROUTER_USAGE}`);
+}
+
+/** `/smart-router plus-status` — Plus feature flags + last task risk. */
+export function formatPlusStatusMessage(
+  runtime: SmartRouterRuntime,
+  sessionId?: string | undefined,
+): string {
+  const plus = runtime.plus;
+  const config = plus?.config ?? DEFAULT_PLUS_CONFIG;
+  const snapshot = plus?.taskState.get(sessionId);
+  return formatPlusStatus(config, snapshot);
+}
+
+/** `/smart-router risk` — risk level and reasons for the last task. */
+export function formatRiskMessage(
+  runtime: SmartRouterRuntime,
+  sessionId?: string | undefined,
+): string {
+  return formatRiskReport(runtime.plus?.taskState.get(sessionId));
 }
 
 export function formatStatusMessage(

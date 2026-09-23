@@ -1,2 +1,15 @@
 .pi/extensions/smart-router/node_modules
 .pi/extensions/smart-router/package-lock.json
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials.json
+credentials.yaml
+credentials.yml
+auth.json
+tokens.json
+local-state/
+private-config/
+logs/

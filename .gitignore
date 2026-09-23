@@ -42,3 +42,18 @@ coverage/
 
 # Cusor 
 .cursor/
+
+# Pi Smart Router Plus — never commit secrets or local Plus state
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials.json
+credentials.yaml
+credentials.yml
+auth.json
+tokens.json
+local-state/
+private-config/
+logs/

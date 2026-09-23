@@ -5,6 +5,8 @@ import {
   formatDoctorMessage,
   formatHistoryMessage,
   formatPlacementPlanMessage,
+  formatPlusStatusMessage,
+  formatRiskMessage,
   formatStatsMessage,
   formatStatusMessage,
   parseSmartRouterArgs,
@@ -21,7 +23,7 @@ import { FLEET_MODE_ENTRY_TYPE } from './session-lifecycle.js';
 import type { SmartRouterRuntime } from './types.js';
 
 export const SMART_ROUTER_USAGE =
-  '/smart-router [status] | history [limit] | stats [limit] | mode scoped|all | pricing refresh | export dataset [--limit N] | export telemetry-contrib [--limit N] [--embeddings] | feedback good|bad | unpin | plan [--json] | doctor';
+  '/smart-router [status] | history [limit] | stats [limit] | mode scoped|all | pricing refresh | export dataset [--limit N] | export telemetry-contrib [--limit N] [--embeddings] | feedback good|bad | unpin | plan [--json] | doctor | plus-status | risk';
 
 type CompletionItem = { value: string; label: string };
 
@@ -36,6 +38,8 @@ const TOP_LEVEL: CompletionItem[] = [
   { value: 'unpin', label: 'Clear current session pin' },
   { value: 'plan', label: 'Read-only local placement report (warm/cold, bottleneck)' },
   { value: 'doctor', label: 'Read-only local readiness checklist' },
+  { value: 'plus-status', label: 'Show Plus feature flags (Risk Guard, Planner Read-only)' },
+  { value: 'risk', label: 'Show Risk Guard level and reasons for the last task' },
 ];
 
 const MODE_COMPLETIONS: CompletionItem[] = [
@@ -78,6 +82,8 @@ export const SMART_ROUTER_FULL_INVOCATIONS = [
   'plan',
   'plan --json',
   'doctor',
+  'plus-status',
+  'risk',
 ] as const;
 
 function filterByPrefix(items: CompletionItem[], prefix: string): CompletionItem[] {
@@ -173,6 +179,22 @@ export function registerSmartRouterCommand(
 
         if (parsed.command === 'status') {
           ctx.ui.notify(formatStatusMessage(runtime, runtime.lastDecision), 'info');
+          return;
+        }
+
+        if (parsed.command === 'plus-status') {
+          ctx.ui.notify(
+            formatPlusStatusMessage(runtime, ctx.sessionManager.getSessionId()),
+            'info',
+          );
+          return;
+        }
+
+        if (parsed.command === 'risk') {
+          ctx.ui.notify(
+            formatRiskMessage(runtime, ctx.sessionManager.getSessionId()),
+            'info',
+          );
           return;
         }
 

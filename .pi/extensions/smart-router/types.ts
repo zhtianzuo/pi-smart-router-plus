@@ -19,6 +19,7 @@ import type {
   AdaptiveReasoningConfig,
   ModelProfile,
   PlanningDelegateConfig,
+  PlusRuntime,
   PriceCatalog,
   RoutingDecision,
   RoutingReasoningTelemetry,
@@ -47,7 +48,9 @@ export type SmartRouterCommand =
       includeEmbeddings?: boolean;
     }
   | { command: 'feedback'; rating: 'good' | 'bad' }
-  | { command: 'unpin' };
+  | { command: 'unpin' }
+  | { command: 'plus-status' }
+  | { command: 'risk' };
 
 /** Provider stream delegate; defaults to pi-ai streamSimple when omitted. */
 export type DelegateStreamFn = (
@@ -81,6 +84,12 @@ export interface StreamDelegationDeps {
   readonly outcomeRecorder?: OutcomeRecorder;
   readonly sessionPinner?: SessionPinner;
   readonly sessionRouting?: Map<string, SessionRoutingSnapshot>;
+  /**
+   * Plus safety/quality layer (Risk Guard + Planner Read-only Guard).
+   * Absent when the host did not wire the Plus runtime — upstream behavior is
+   * then preserved exactly.
+   */
+  readonly plus?: PlusRuntime | undefined;
   onRoutingDecision?: (decision: RoutingDecision) => void;
   /** Fired when a delegated provider stream completes successfully. */
   onDelegatedModel?: (model: {
@@ -121,6 +130,8 @@ export interface SmartRouterRuntime {
   readonly outcomeRecorder?: OutcomeRecorder;
   readonly sessionRouting: Map<string, SessionRoutingSnapshot>;
   streamDeps: StreamDelegationDeps;
+  /** Plus safety/quality layer; disabled features stay no-ops. */
+  readonly plus?: PlusRuntime | undefined;
   hydraMatcher: HydraMatcher | undefined;
   setLmuStatus?: (modelId: string) => void;
   clearLmuStatus?: () => void;

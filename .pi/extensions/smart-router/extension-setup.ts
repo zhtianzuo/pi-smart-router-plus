@@ -8,6 +8,7 @@ import {
   resolveOperatorConfigFromEnv,
   ExecutionLedger,
   createRouterFromFleet,
+  createPlusRuntime,
   LifecycleHookState,
 } from '../../../src/index.js';
 import type {
@@ -88,6 +89,8 @@ export async function createSmartRouterRuntime(cwd: string): Promise<{
   const hydraMatcher = await initHydraMatcher();
   const store = createExtensionStore(cwd);
   const operatorConfig = resolveOperatorConfigFromEnv();
+  // Plus layer: Risk Guard + Planner Read-only Guard (config from env/plus.json).
+  const plus = createPlusRuntime({ cwd });
   const sessionPinner = createOperatorAwareSessionPinner(store, operatorConfig);
   const executionLedger = new ExecutionLedger();
   const lifecycleHookState = new LifecycleHookState();
@@ -104,6 +107,7 @@ export async function createSmartRouterRuntime(cwd: string): Promise<{
     fleetMode: 'scoped',
     lastDecision: undefined,
     priceCatalog: null,
+    plus,
     modelRegistry,
     store,
     sessionPinner,
@@ -132,6 +136,7 @@ export async function createSmartRouterRuntime(cwd: string): Promise<{
       outcomeRecorder,
       sessionPinner,
       sessionRouting,
+      plus,
       onRoutingDecision(decision) {
         runtime.lastDecision = decision;
       },
@@ -187,6 +192,8 @@ export async function wireSmartRouterExtension(
 
   setupSessionHooks(pi, runtime, runtime.sessionPinner, datasetNotify);
 
+  registerPlusHooks(pi, runtime);
+
   let registeredLimits: ModelLimits | undefined;
 
   // Re-register the auto model entry with the delegated model's real limits.
@@ -219,5 +226,52 @@ export async function wireSmartRouterExtension(
     ...PROVIDER_BASE_CONFIG,
     models: [buildAutoModelEntry()],
     streamSimple: createStreamSimple(runtime.streamDeps),
+  });
+}
+
+/**
+ * Plus hooks (Risk Guard + Planner Read-only Guard).
+ *
+ * - Binds pi's real tool-permission API to the planner read-only guard.
+ * - Registers the `tool_call` hook: while the planner read-only window is open
+ *   write-capable tools are blocked at the tool layer; otherwise the call is
+ *   allowed and only its local risk signal is recorded (no LLM, no network).
+ */
+export function registerPlusHooks(pi: ExtensionAPI, runtime: SmartRouterRuntime): void {
+  const plus = runtime.plus;
+  if (!plus) {
+    return;
+  }
+
+  plus.plannerGuard.bindGate({
+    getActiveTools: () => pi.getActiveTools(),
+    setActiveTools: (toolNames) => pi.setActiveTools(toolNames),
+  });
+
+  pi.on('tool_call', (event, ctx) => {
+    const sessionId = ctx.sessionManager.getSessionId();
+    const record = plus.evaluateToolCall(event.toolName, event.input, sessionId);
+
+    if (record.blocked) {
+      return {
+        block: true,
+        reason:
+          record.reason ??
+          'blocked by Pi Smart Router Plus planner read-only guard',
+      };
+    }
+
+    if (record.risk.level === 'high') {
+      plus.taskState.recordRisk(sessionId, record.risk, {
+        sessionId,
+        turnType: 'tool_call',
+      });
+      ctx.ui.notify(
+        `Risk Guard: HIGH risk tool call (${record.risk.reasons.join(', ') || event.toolName})`,
+        'warning',
+      );
+    }
+
+    return undefined;
   });
 }

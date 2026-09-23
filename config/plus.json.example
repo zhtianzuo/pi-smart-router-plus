@@ -1,0 +1,8 @@
+{
+  "plus": {
+    "riskGuard": true,
+    "plannerReadOnly": true,
+    "verification": false,
+    "reviewer": false
+  }
+}

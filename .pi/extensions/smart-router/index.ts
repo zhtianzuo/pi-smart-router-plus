@@ -37,6 +37,8 @@ import {
 } from './fleet-bootstrap.js';
 import {
   formatHistoryMessage,
+  formatPlusStatusMessage,
+  formatRiskMessage,
   formatStatsMessage,
   formatStatusMessage,
   parseSmartRouterArgs,
@@ -58,7 +60,7 @@ import {
   logRoutingDecision,
   resolveDelegationOptions,
 } from './stream-delegation.js';
-import { createSmartRouterRuntime, wireSmartRouterExtension } from './extension-setup.js';
+import { createSmartRouterRuntime, registerPlusHooks, wireSmartRouterExtension } from './extension-setup.js';
 import { getRouterStateDbPath } from './utils.js';
 
 export {
@@ -84,6 +86,8 @@ export {
   formatLmuStatus,
   formatPricingStalenessLine,
   formatHistoryMessage,
+  formatPlusStatusMessage,
+  formatRiskMessage,
   formatStatsMessage,
   formatStatusMessage,
   getDatasetExportPath,
@@ -101,6 +105,7 @@ export {
   capturePreRouteOutcomes,
   updateSessionRoutingSnapshot,
   initHydraMatcher,
+  registerPlusHooks,
   wireSmartRouterExtension,
 };
 export {
@@ -124,6 +129,30 @@ export {
   hasToolCallHistoryFromContext,
   isGoogleGeminiProfile,
   resolveEffectiveFleet,
+} from '../../../src/index.js';
+// Plus layer (Risk Guard + Planner Read-only Guard) — re-exported so extension
+// consumers and tests use the public facade only.
+export {
+  DEFAULT_PLUS_CONFIG,
+  PLUS_VERSION,
+  PlannerReadonlyGuard,
+  PlusRuntime,
+  PlusTaskState,
+  READ_ONLY_TOOL_NAMES,
+  applyRiskGuardToRequest,
+  classifyPlannerToolCall,
+  classifyRisk,
+  createPlusRuntime,
+  extractToolCallSurface,
+  formatPlusStatus,
+  formatRiskReport,
+  isReadOnlyShellCommand,
+  resolvePlusConfig,
+  type PlusConfig,
+  type PlusTaskSnapshot,
+  type RiskDecision,
+  type RiskInput,
+  type RiskLevel,
 } from '../../../src/index.js';
 
 export default async function smartRouterExtension(pi: ExtensionAPI): Promise<void> {

@@ -296,3 +296,7 @@ export {
   exportTelemetryContrib,
   parseExportTelemetryContribArgs,
 } from './cli/smart-router-cli.js';
+
+// Plus — additive safety/quality layer (Risk Guard, Planner Read-only Guard).
+// Kept in one barrel so the extension imports the public facade only.
+export * from './plus/index.js';

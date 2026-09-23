@@ -46,6 +46,7 @@ import { capturePreRouteOutcomes, updateSessionRoutingSnapshot } from './routing
 import {
   isPlanningDelegateActive,
   resolvePlanningDelegatePath,
+  type PlanningDelegateResolution,
 } from './planning-delegate.js';
 import type { StreamDelegationDeps } from './types.js';
 import { isAbortError, throwIfAborted } from './utils.js';
@@ -355,6 +356,11 @@ export async function routeAndDelegate(
       options,
       deps.lifecycleHookState,
     );
+    // Plus: Risk Guard may rewrite turn_type to force planning on a HIGH-risk
+    // task's planning-eligible turn (never on an in-flight executor turn).
+    if (deps.plus) {
+      request = deps.plus.applyRisk(request, context.messages).request;
+    }
     guardResult = resolveEffectiveFleet(deps.fleet, request, context.messages);
     effectiveFleet = guardResult.effectiveFleet;
     assertRoutableFleetAfterGeminiToolHistoryGuard(guardResult);
@@ -408,6 +414,7 @@ export async function routeAndDelegate(
   }
 
   deps.onRoutingDecision?.(decision);
+  deps.plus?.recordDecision(request.session_id, decision);
   deps.datasetRecorder?.record(request, decision);
   updateSessionRoutingSnapshot(deps, sessionId, request, decision);
 
@@ -416,16 +423,33 @@ export async function routeAndDelegate(
   if (isPlanningDelegateActive(decision)) {
     // Phase boundary: abort before planning-delegate sub-call.
     throwIfAborted(options);
-    const planningResolution = await resolvePlanningDelegatePath(
-      context,
-      decision,
-      options,
-      deps,
-    );
+    // Plus: Planner Read-only Guard. The planner runs with a read-only tool
+    // window; the executor's tools are restored in `finally` on success,
+    // fallback and thrown exceptions alike.
+    const planningGuard =
+      deps.plus?.config.plannerReadOnly === true ? deps.plus.plannerGuard : undefined;
+    let planningResolution: PlanningDelegateResolution;
+    if (planningGuard) {
+      planningGuard.enter(request.session_id);
+    }
+    try {
+      planningResolution = await resolvePlanningDelegatePath(
+        context,
+        decision,
+        options,
+        deps,
+      );
+    } finally {
+      if (planningGuard) {
+        planningGuard.exit(request.session_id);
+      }
+    }
+    deps.plus?.recordPlanningGuard(request.session_id, planningGuard !== undefined);
     delegationContext = planningResolution.context;
     decision = planningResolution.decision;
     if (!planningResolution.usedDelegatePath) {
       deps.onRoutingDecision?.(decision);
+      deps.plus?.recordDecision(request.session_id, decision);
     }
   }
 

@@ -194,6 +194,8 @@ describe('getSmartRouterArgumentCompletions', () => {
       'unpin',
       'plan',
       'doctor',
+      'plus-status',
+      'risk',
     ]);
   });
 

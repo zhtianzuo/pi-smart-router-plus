@@ -1,7 +1,7 @@
 {
-  "name": "pi-smart-router",
-  "version": "1.2.0",
-  "description": "Auto-model router middleware for the pi.dev coding agent",
+  "name": "pi-smart-router-plus",
+  "version": "0.1.0",
+  "description": "Auto-model router middleware for the pi.dev coding agent, plus a thin safety/quality layer (Risk Guard, Planner Read-only Guard)",
   "type": "module",
   "license": "MIT",
   "keywords": [
@@ -9,6 +9,8 @@
     "pi-extension",
     "pi",
     "smart-router",
+    "pi-smart-router-plus",
+    "risk-guard",
     "routing",
     "ai",
     "agent"
