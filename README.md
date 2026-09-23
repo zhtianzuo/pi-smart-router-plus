@@ -1727,3 +1727,55 @@ artifacts yourself.
 
 The full instructions (Track A offline smoke, optional Track C corpus sharing)
 live in [`docs/upstream-README.md`](docs/upstream-README.md#contribute-a-community-bench-report).
+
+---
+
+## 本地安装与冒烟验证（v0.1.0）
+
+不要修改 npm 安装目录，也不要同时加载 `npm:pi-smart-router` 与本地 path 版本。
+
+```Bash
+cd "/absolute/path/to/Smart Router Plus Dev"
+npm install
+
+pi list                          # 检查是否已加载 npm:pi-smart-router
+pi remove npm:pi-smart-router    # 有则移除，避免双重加载
+pi install "/absolute/path/to/Smart Router Plus Dev"
+
+pi --list-models | grep smart-router
+```
+
+不改动 Pi 全局配置、不产生任何模型调用的冒烟验证：
+
+```Bash
+cd "/absolute/path/to/Smart Router Plus Dev"
+pi -ne -e .pi/extensions/smart-router/index.ts --offline --list-models | grep smart-router
+```
+
+预期输出：
+
+```Plain Text
+smart-router  auto                    200K     16.4K    yes       yes
+```
+
+进入 Pi 后：
+
+```Plain Text
+/model smart-router/auto
+/smart-router status
+/smart-router history
+/smart-router stats
+/smart-router plus-status
+/smart-router risk
+```
+
+### 原生依赖 ABI 警告
+
+若启动时出现 `SQLite store open failed ... NODE_MODULE_VERSION`，说明 `better-sqlite3`
+是按与 `pi` 不同的 Node 版本编译的。Pi 会回退到内存 store（路由与 Risk Guard 不受影响，
+只是历史/统计不落盘）。用与 `pi` 相同的 Node 重新编译即可：
+
+```Bash
+head -1 "$(command -v pi)"        # 查看 pi 使用的 node（macOS Homebrew 示例）
+PATH="/opt/homebrew/opt/node/bin:$PATH" npm rebuild better-sqlite3
+```
