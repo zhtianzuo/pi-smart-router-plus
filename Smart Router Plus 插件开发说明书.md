@@ -113,8 +113,10 @@ Planning Delegate
 Session Pin
 Prompt Cache Logic
 Tool Failure Escalation
-HyDRA Matcher
+Hydra Matcher
 成本数据库
+余额 / 积分 / 配额记账系统
+Pi 中已有的 provider 余额 API 客户端
 完整 Agent Framework
 ```
 
@@ -1020,6 +1022,136 @@ Verification
 
 ---
 
+# 新增能力五：余额 / 额度感知调度
+
+目标：某个 model 的**账号余额或套餐额度为零/接近零时，尽量改用别的模型**，而不是每次都先浪费一次失败调用。
+
+分两层：
+
+```Plain Text
+P1 Depletion Guard   错误驱动，纯本地，零网络，默认 ON
+P2 Balance Probe     主动探测，有网络请求，默认 OFF（opt-in）
+```
+
+## 复用上游已有能力
+
+上游已有 `ModelProfile.healthy === false`，且全链路已经尊重它：
+
+```Plain Text
+context-fit
+expected-cost
+sub-route-policy（选最便宜健康模型）
+session-pinner（包含 force_rejected_unhealthy）
+loop-escalation
+degraded-route-sandwich
+safe-cloud-default
+```
+
+因此 Plus 只需**把耗尽账号标成 unhealthy**，不得新增第二套评分/路由/模型注册表。
+
+上游已有的其他机制（不得重复实现）：
+
+```Plain Text
+shouldFailoverOnProviderError   仅当次 failover，不落记忆
+CircuitBreaker                  内存 30s，且余额类错误不算 infra
+RateLimitPort                   请求速率令牌桶，不是余额
+quota-window-feed / virtual-cost-v2 / peak-pricing   只影响成本估算
+```
+
+## P1 分类规则（确定性、本地）
+
+```Plain Text
+billing_depleted        402 / insufficient balance|quota / no credits / 余额不足 / 欠费   TTL 6h
+quota_window_exhausted  订阅 usage limit / resource_exhausted / 配额已用尽              TTL 30min
+```
+
+必须**不**归类为余额耗尽：
+
+```Plain Text
+普通 429 rate limit（上游熔断器负责）
+401 / 403 鉴权失败
+5xx 基础设施错误
+```
+
+## 账号隔离
+
+```Plain Text
+状态键 = provider + 凭据非敏感指纹
+指纹   = SHA-256(凭据) 截断前 12 位十六进制（fp_<12 hex>）
+```
+
+约束：
+
+```Plain Text
+API Key 本身不落盘、不写日志
+错误详情必须脱敏后再存储（sk-* / Bearer * / api_key=* / ≥32 位长串 → [redacted]）
+同一 provider 的多个账号互不影响
+换 Key 后指纹变化，旧账号的耗尽状态自动不再命中
+```
+
+## 必须 fail-open
+
+```Plain Text
+排除后若没有任何可路由模型 → 回退全量 fleet 并告警
+状态文件损坏 / 不可读 / 不可写 → 继续运行，仅内存态
+探测报错 / 超时 / 响应结构不认识 → 不改变任何状态
+```
+
+## P2 探测规则
+
+只接**官方文档有据**的接口：
+
+```Plain Text
+deepseek     GET https://api.deepseek.com/user/balance        is_available / balance_infos[].total_balance
+openrouter   GET https://openrouter.ai/api/v1/key             data.limit_remaining
+minimax-cn   GET https://www.minimax.cn/v1/token_plan/remains  Token Plan 剩余额度（官方未公布字段）
+```
+
+其他 provider：
+
+```Plain Text
+openai / openai-codex / anthropic 无官方余额接口 → 只能靠 P1 错误驱动
+```
+
+行为约束：
+
+```Plain Text
+默认关闭，必须显式启用
+凭据只经 Pi 官方 modelRegistry.getApiKeyForProvider() 获取
+只用已配置的 provider Key，不新增 management key 配置
+fire-and-forget 刷新 + TTL + in-flight 互斥，不得阻塞 TTFT
+单次请求有超时上限
+只有“解析成功”的结果才允许改变状态
+账户级总额度耗尽由 P1 负责，探测不承担
+```
+
+OpenRouter 补充规则：
+
+```Plain Text
+limit_remaining <= minBalance（含 <= 0）  → 记录耗尽/偏低
+limit_remaining 为 null / 缺失 / 非数值    → 未知，fail-open，不改状态
+```
+
+MiniMax 补充规则：官方未公布响应字段，因此做**容错解析**（受限深度收集“剩余/额度”类数值并取最小值，即 5 小时窗口与周窗口中的约束者），识别不了就不动作；启用后需人工核对一次。
+
+## 状态存储
+
+```Plain Text
+.pi-smart-router/plus-balance.json
+```
+
+Plus 自有边车，原子写、TTL 清理；不改上游 SQLite schema 与 StorePort。
+
+## 命令
+
+```Plain Text
+/smart-router balance             # 账号级余额/耗尽状态（指纹、TTL、来源、detail）
+/smart-router balance --refresh   # 立即探测（需先启用 P2）
+/smart-router plus-status         # 只显示简要：Balance Guard / Balance Probe / Blocked accounts: N
+```
+
+---
+
 # 保留 Smart Router 原有 Thinking
 
 Smart Router Plus 不再实现一套自己的 Thinking 系统。
@@ -1113,14 +1245,22 @@ Plus 不重新实现。
     "riskGuard": true,
     "plannerReadOnly": true,
     "verification": false,
-    "reviewer": false
+    "reviewer": false,
+    "balanceGuard": true,
+    "balanceProbe": false,
+    "minBalance": 0,
+    "balanceProbeTtlSeconds": 600
   }
 }
 ```
 
+`balanceGuard` 纯本地、零成本，默认 ON；`balanceProbe` 会产生网络请求，默认 OFF，必须显式启用。
+
 不增加模型账号配置。
 
 不增加 Provider Key。
+
+**不增加 management key / 第二套凭据配置**（余额探测只用 Pi 已配置的 provider Key）。
 
 不增加 Thinking 映射。
 
@@ -1164,6 +1304,8 @@ false
 ```Plain Text
 /smart-router plus-status
 /smart-router risk
+/smart-router balance
+/smart-router balance --refresh
 ```
 
 后续：
@@ -1219,6 +1361,8 @@ route stage
 selected model
 thinking
 risk level
+balance status / depletion reason
+credential fingerprint（fp_<12 hex>，非敏感）
 verification status
 review status
 ```
@@ -1991,6 +2135,11 @@ v1\.0 最终必须满足：
 ✓ Risk Guard 工作
 ✓ Planner 真正只读
 ✓ Executor 能恢复写权限
+✓ 余额/额度耗尽后下一次请求会避开该账号
+✓ 耗尽状态按 provider + 凭据指纹隔离
+✓ 没有复制 API Key（只存不可逆指纹）
+✓ 余额策略在候选为空时 fail-open
+✓ Balance Probe 默认关闭、不阻塞路由、不需要 management key
 ✓ Verification 可选启用
 ✓ Reviewer 可选启用
 ✓ 没有复制 API Key

@@ -75,18 +75,70 @@ describe('Plus Balance Probe — documented endpoint parsing', () => {
     expect(deepseek.parse(null, 0).parsed).toBe(false);
   });
 
-  it('computes OpenRouter remaining credits', () => {
-    const outcome = openrouter.parse({ data: { total_credits: 100.5, total_usage: 25.75 } }, 0);
+  it('reads the OpenRouter per-key spend limit', () => {
+    const outcome = openrouter.parse(
+      { data: { limit: 100, limit_remaining: 74.5, usage: 25.5, is_free_tier: false } },
+      0,
+    );
     expect(outcome.parsed).toBe(true);
-    expect(outcome.balance).toEqual({ currency: 'USD', total: '74.75', available: true });
+    expect(outcome.depleted).toBe(false);
+    expect(outcome.low).toBe(false);
+    expect(outcome.balance).toEqual({ currency: 'USD', total: '74.5', available: true });
+    // Healthy outcomes carry no detail (they are not persisted).
+    expect(outcome.detail).toBeNull();
+  });
 
-    const exhausted = openrouter.parse({ data: { total_credits: 10, total_usage: 10 } }, 0);
-    expect(exhausted.depleted).toBe(true);
-    expect(exhausted.reason).toBe('billing_depleted');
+  it('marks an exhausted OpenRouter key limit as depleted', () => {
+    for (const remaining of [0, -0.5]) {
+      const outcome = openrouter.parse({ data: { limit_remaining: remaining } }, 0);
+      expect(outcome.parsed, String(remaining)).toBe(true);
+      expect(outcome.depleted, String(remaining)).toBe(true);
+      expect(outcome.reason).toBe('billing_depleted');
+      expect(outcome.detail).toBe(`limit_remaining=${remaining}`);
+    }
+  });
+
+  it('marks a low OpenRouter key limit as low', () => {
+    const outcome = openrouter.parse({ data: { limit_remaining: 0.5 } }, 1);
+    expect(outcome.depleted).toBe(false);
+    expect(outcome.low).toBe(true);
+    expect(outcome.reason).toBe('balance_low');
+  });
+
+  it('fails open for an unlimited OpenRouter key (limit_remaining null/missing)', () => {
+    for (const payload of [
+      { data: { limit: null, limit_remaining: null, usage: 25.5 } },
+      { data: { usage: 25.5 } },
+    ]) {
+      const outcome = openrouter.parse(payload, 0);
+      expect(outcome.parsed, JSON.stringify(payload)).toBe(false);
+      expect(outcome.depleted).toBe(false);
+      expect(outcome.detail).toBe('limit_remaining not set');
+    }
   });
 
   it('fails open on an unrecognized OpenRouter payload', () => {
+    expect(openrouter.parse({}, 0).parsed).toBe(false);
     expect(openrouter.parse({ data: {} }, 0).parsed).toBe(false);
+    expect(openrouter.parse({ data: { limit_remaining: 'n/a' } }, 0)).toMatchObject({
+      parsed: false,
+      depleted: false,
+      detail: 'unrecognized response',
+    });
+    // The old /credits shape must no longer be treated as a balance.
+    expect(openrouter.parse({ data: { total_credits: 10, total_usage: 10 } }, 0).parsed).toBe(
+      false,
+    );
+  });
+
+  it('surfaces the free-tier flag without changing the classification', () => {
+    const outcome = openrouter.parse({ data: { limit_remaining: 0, is_free_tier: true } }, 0);
+    expect(outcome.depleted).toBe(true);
+    expect(outcome.detail).toBe('limit_remaining=0 free_tier');
+  });
+
+  it('uses the documented OpenRouter endpoint', () => {
+    expect(openrouter.endpoint).toBe('https://openrouter.ai/api/v1/key');
   });
 
   it('reads MiniMax Token Plan quota tolerantly and takes the binding window', () => {

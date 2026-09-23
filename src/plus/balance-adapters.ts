@@ -5,9 +5,13 @@
  *   deepseek    GET https://api.deepseek.com/user/balance
  *               → { is_available, balance_infos: [{ currency, total_balance, ... }] }
  *               https://api-docs.deepseek.com/api/get-user-balance
- *   openrouter  GET https://openrouter.ai/api/v1/credits
- *               → { data: { total_credits, total_usage } }   (management key)
- *               https://openrouter.ai/docs/api/api-reference/credits/get-credits
+ *   openrouter  GET https://openrouter.ai/api/v1/key
+ *               → { data: { limit_remaining, limit, usage, is_free_tier, ... } }
+ *               https://openrouter.ai/docs/api/api-reference/api-keys/get-current-key
+ *               Ordinary (non-management) keys work here; `limit_remaining` is
+ *               null when no key spend limit is configured → unknown, fail open.
+ *               Account-wide credit exhaustion stays P1's job (402 /
+ *               insufficient balance on the delegation itself).
  *   minimax-cn  GET https://www.minimax.cn/v1/token_plan/remains
  *               → response body is NOT published in the official docs
  *               (https://platform.minimaxi.com/docs/token-plan/faq "如何查看 Token Plan 用量").
@@ -128,28 +132,44 @@ function parseDeepSeek(payload: unknown, minBalance: number): BalanceProbeOutcom
 
 // ─── OpenRouter ───────────────────────────────────────────────────────────────
 
-function parseOpenRouter(payload: unknown, minBalance: number): BalanceProbeOutcome {
+/**
+ * OpenRouter `GET /api/v1/key` → `data.limit_remaining`.
+ *
+ * Uses the per-key spend limit, which ordinary provider keys can read (the
+ * `/credits` endpoint requires a management key, which Pi does not hold).
+ * A missing/null `limit_remaining` means "no limit configured" — unknown, so
+ * fail open and let P1 catch real account exhaustion from the API error.
+ */
+function parseOpenRouterKey(payload: unknown, minBalance: number): BalanceProbeOutcome {
   const root = asRecord(payload);
   const data = root ? asRecord(root['data']) : undefined;
-  const credits = toNumber(data?.['total_credits']);
-  const usage = toNumber(data?.['total_usage']);
-
-  if (credits === null || usage === null) {
+  if (!data) {
     return unavailable('unrecognized response');
   }
 
-  const remaining = credits - usage;
+  const raw = data['limit_remaining'];
+  if (raw === null || raw === undefined) {
+    return unavailable('limit_remaining not set');
+  }
+
+  const remaining = toNumber(raw);
+  if (remaining === null) {
+    return unavailable('unrecognized response');
+  }
+
+  const freeTier = data['is_free_tier'] === true;
   const observation: BalanceObservation = {
     currency: 'USD',
-    total: remaining.toFixed(2),
+    total: String(remaining),
     available: remaining > 0,
   };
+  const detail = `limit_remaining=${remaining}${freeTier ? ' free_tier' : ''}`;
 
   if (remaining <= 0) {
-    return classified(observation, 'billing_depleted', true, `remaining=${observation.total}`);
+    return classified(observation, 'billing_depleted', true, detail);
   }
   if (remaining <= minBalance) {
-    return classified(observation, 'balance_low', false, `remaining=${observation.total}`);
+    return classified(observation, 'balance_low', false, detail);
   }
   return ok(observation);
 }
@@ -240,7 +260,7 @@ function parseMiniMaxTokenPlan(
 
 export const BALANCE_PROBE_ADAPTERS: readonly BalanceProbeAdapter[] = [
   { provider: 'deepseek', endpoint: 'https://api.deepseek.com/user/balance', parse: parseDeepSeek },
-  { provider: 'openrouter', endpoint: 'https://openrouter.ai/api/v1/credits', parse: parseOpenRouter },
+  { provider: 'openrouter', endpoint: 'https://openrouter.ai/api/v1/key', parse: parseOpenRouterKey },
   {
     provider: 'minimax-cn',
     endpoint: 'https://www.minimax.cn/v1/token_plan/remains',

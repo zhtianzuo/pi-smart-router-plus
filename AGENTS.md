@@ -116,8 +116,9 @@ Smart Router Plus adds only:
 ```Plain Text
 1. Risk Guard
 2. Planner Read-only Guard
-3. Verification Policy
-4. Optional Reviewer
+3. Depletion Guard (balance/quota-aware routing)
+4. Verification Policy
+5. Optional Reviewer
 ```
 
 Priority:
@@ -126,6 +127,8 @@ Priority:
 P0 upstream compatibility
 P1 Risk Guard
 P1 Planner Read-only Guard
+P1 Depletion Guard
+P2 Balance Probe (opt-in)
 P2 Verification
 P3 Reviewer
 ```
@@ -151,6 +154,8 @@ prompt-cache logic
 tool-failure escalation
 fallback routing
 cost database
+balance / credit / quota accounting
+provider balance API clients that already exist in Pi
 ```
 
 Use upstream APIs and state\.
@@ -476,6 +481,74 @@ Use Pi and Smart Router model data\.
 
 ---
 
+## Balance / Depletion Guard
+
+Goal: when an account has zero or near-zero balance/quota, prefer other models instead of paying for one failed call every time.
+
+Reuse upstream first:
+
+```Plain Text
+ModelProfile.healthy === false
+```
+
+Upstream already honors this flag across context-fit, expected-cost, sub-route selection, session pinning (force rejection), loop escalation and safe-default fallback. Mark the affected models unhealthy; do not add a second scoring engine, router, or model registry.
+
+Two layers, both optional to disable:
+
+```Plain Text
+P1 Depletion Guard   error-driven, purely local, zero network, default ON
+P2 Balance Probe     active provider probe, network, default OFF (opt-in)
+```
+
+Classification rules (deterministic, local):
+
+```Plain Text
+billing_depleted       402 / insufficient balance|quota / no credits / 余额不足 / 欠费   TTL 6h
+quota_window_exhausted subscription usage limit / resource_exhausted / 配额已用尽        TTL 30min
+```
+
+Must NOT be classified as depletion:
+
+```Plain Text
+plain 429 rate limit (upstream circuit breaker owns it)
+401 / 403 authentication failures
+5xx infrastructure errors
+```
+
+Account isolation:
+
+```Plain Text
+state key = provider + credential fingerprint
+fingerprint = truncated SHA-256 of the credential (fp_<12 hex>)
+```
+
+Never persist or log the credential itself; redact credential-looking text from any stored detail. A changed credential yields a different fingerprint, so a depleted account stops matching automatically. One account must never disable another account of the same provider.
+
+Fail-open is mandatory:
+
+```Plain Text
+if excluding would leave no routable model -> use the full fleet and warn
+corrupt / unreadable / unwritable state     -> keep going, in-memory only
+probe error / timeout / unknown schema      -> change NO state
+```
+
+Balance Probe rules:
+
+```Plain Text
+P2 is off unless explicitly enabled
+only officially documented endpoints
+credentials only via pi's modelRegistry.getApiKeyForProvider()
+never add or require a management key / separate credential config
+fire-and-forget refresh, gated by TTL and an in-flight guard
+must never block TTFT; bounded per-request timeout
+only a successfully parsed response may change state
+account-wide exhaustion is P1's job, not the probe's
+```
+
+State lives in a Plus-owned sidecar (` .pi-smart-router/plus-balance.json `, atomic write, TTL-pruned). Do not extend upstream SQLite schema or StorePort for this.
+
+---
+
 ## Configuration
 
 Keep configuration minimal\.
@@ -488,10 +561,16 @@ Preferred shape:
     "riskGuard": true,
     "plannerReadOnly": true,
     "verification": false,
-    "reviewer": false
+    "reviewer": false,
+    "balanceGuard": true,
+    "balanceProbe": false,
+    "minBalance": 0,
+    "balanceProbeTtlSeconds": 600
   }
 }
 ```
+
+`balanceGuard` is local and free, so it defaults ON. `balanceProbe` performs network calls, so it defaults OFF and must be explicitly enabled. Do not add further balance/quota fields without implemented behavior behind them.
 
 Do not add configuration fields unless they are required by implemented behavior\.
 
@@ -510,6 +589,8 @@ Possible additions:
 ```Plain Text
 /smart-router plus-status
 /smart-router risk
+/smart-router balance
+/smart-router balance --refresh
 /smart-router verify
 ```
 
@@ -527,6 +608,8 @@ selected model
 thinking level
 route stage
 risk level
+balance status / depletion reason
+credential fingerprint (fp_<12 hex>, non-sensitive)
 verification status
 review status
 ```
@@ -560,9 +643,17 @@ Suggested files:
 src/plus/
 ├── risk-guard.ts
 ├── planner-readonly.ts
+├── depletion-guard.ts
+├── balance-types.ts
+├── balance-state.ts
+├── balance-adapters.ts
+├── balance-probe.ts
 ├── verification-policy.ts
 ├── reviewer.ts
 ├── task-state.ts
+├── config.ts
+├── runtime.ts
+├── index.ts
 └── types.ts
 ```
 
@@ -720,6 +811,33 @@ thrown exception
 
 Use `try/finally`\.
 
+Required balance tests:
+
+```Plain Text
+402 / insufficient balance      → depleted (billing, long TTL)
+usage limit / resource_exhausted → depleted (quota window, short TTL)
+plain 429 rate limit             → NOT depleted
+401 / 403 / 5xx                  → NOT depleted
+second account, same provider    → NOT affected (fingerprint isolation)
+credential rotated               → old depletion no longer matches
+all accounts depleted            → fail-open, full fleet, request still routed
+balanceGuard = false             → routing identical to upstream
+probe disabled                   → zero network calls
+probe error / timeout / unknown  → no state change
+probe stalled                    → routed request still completes
+```
+
+Required Balance Probe adapter tests:
+
+```Plain Text
+normal key      → parsed from the documented field
+unlimited key   → limit/remaining null → unknown, fail-open
+exhausted key   → depleted
+abnormal body   → fail-open, no state change
+```
+
+No test may assert on, print or persist a real credential; use synthetic values and assert only the fingerprint.
+
 ---
 
 ## Performance Constraints
@@ -727,6 +845,10 @@ Use `try/finally`\.
 Risk classification must not add an LLM call\.
 
 Planner read\-only enforcement must not add an LLM call\.
+
+Depletion Guard must not add an LLM call and must not perform network I/O\.
+
+Balance Probe must never block the routed request (fire-and-forget plus TTL), must be opt-in, and must fail open on any error\.
 
 Simple tasks must not gain extra cloud\-model calls because of Plus\.
 
@@ -841,10 +963,16 @@ upstream tests still pass
 new tests pass
 Plus can be disabled cleanly
 no credentials are persisted
+no credential fingerprint is reversible to the credential
 no duplicate model registry exists
 no duplicate Thinking system exists
+no duplicate balance/quota accounting exists
 Planner write tools are actually blocked
 Executor tools are restored correctly
+depleted accounts are avoided on the next request
+depletion state is isolated per provider + credential
+balance policy fails open instead of emptying the fleet
+balance probe never blocks routing and never requires a management key
 simple tasks receive no extra cloud calls
 local path installation works
 upstream remains mergeable

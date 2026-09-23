@@ -148,7 +148,7 @@ HIGH   → 在 planning-eligible 轮次强制 planning
 | provider | 接口 | 说明 |
 | --- | --- | --- |
 | `deepseek` | `GET https://api.deepseek.com/user/balance` | `is_available` / `balance_infos[].total_balance` |
-| `openrouter` | `GET https://openrouter.ai/api/v1/credits` | `total_credits - total_usage`（需 management key） |
+| `openrouter` | `GET https://openrouter.ai/api/v1/key` | `data.limit_remaining`（普通 Key 可用；未设限额时为 `null` → 未知，fail-open） |
 | `minimax-cn` | `GET https://www.minimax.cn/v1/token_plan/remains` | 仅 Token Plan 剩余额度；**官方未公布响应字段** |
 | `openai` / `openai-codex` / `anthropic` | — | **无官方余额接口**（订阅制/无余额 API），只能靠 P1 错误驱动 |
 
@@ -159,6 +159,10 @@ HIGH   → 在 planning-eligible 轮次强制 planning
 - 凭据只通过 pi 官方 `modelRegistry.getApiKeyForProvider()` 获取，只进 `Authorization` 头，不落盘不打印。
 - **任何异常都 fail-open**：非订阅 Key、401/403/404、限流、5xx、非 JSON、超时、响应结构不认识 → **不改变任何状态**（只用「解析成功」的结果）。
 - MiniMax 响应字段官方未公布，因此做**容错解析**（深度/键数受限地收集“剩余/额度”类数值字段并取最小值，即 5 小时窗口与周窗口中的约束者）；识别不了就什么都不做。启用后请用 `/smart-router balance` 核对一次结果是否符合预期。
+- OpenRouter 用 `/api/v1/key` 的**每 Key 消费限额**（`limit_remaining`），普通 provider Key 即可读取；`/api/v1/credits` 需要 management key，Pi 不持有，因此不使用。
+  - `limit_remaining <= minBalance`（含 `<= 0`）→ 记录耗尽/偏低。
+  - `limit_remaining` 为 `null`/缺失（未配置限额的 Key）或非数值 → **未知，fail-open，不改变任何状态**。
+  - 账户总额度耗尽仍由 **P1** 从 402 / insufficient balance 错误里捕获。
 
 ### 命令与状态
 
