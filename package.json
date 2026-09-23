@@ -17,11 +17,11 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/beettlle/pi-smart-router.git"
+    "url": "git+ssh://git@github.com/zhtianzuo/pi-smart-router-plus.git"
   },
-  "homepage": "https://github.com/beettlle/pi-smart-router#readme",
+  "homepage": "https://github.com/zhtianzuo/pi-smart-router-plus#readme",
   "bugs": {
-    "url": "https://github.com/beettlle/pi-smart-router/issues"
+    "url": "https://github.com/zhtianzuo/pi-smart-router-plus/issues"
   },
   "engines": {
     "node": ">=22.19.0"

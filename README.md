@@ -2,7 +2,7 @@
 
 # Pi Smart Router Plus
 
-Pi Smart Router Plus 是基于 [`pi-smart-router`](https://github.com/beettlle/pi-smart-router.git) 二次开发的增强版本。
+GitHub: https://github.com/zhtianzuo/pi-smart-router-plus — Pi Smart Router Plus 是基于 [`pi-smart-router`](https://github.com/beettlle/pi-smart-router.git) 二次开发的增强版本。
 
 项目目标不是重写 Smart Router，而是在保留其现有模型路由、Thinking 调节、本地模型支持、Planning Delegate、Fallback、成本控制等能力的基础上，增加：
 
