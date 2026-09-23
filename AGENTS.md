@@ -852,6 +852,95 @@ upstream remains mergeable
 
 ---
 
+## Output Style
+
+The output shown to the user must contain only the final result, not the
+intermediate work\.
+
+Allowed in the output:
+
+```Plain Text
+final result
+diff summary
+necessary command output
+verification evidence
+test results
+```
+
+Not allowed in the output:
+
+```Plain Text
+thinking stream
+step-by-step reasoning
+"let me first check X" reports
+redundant progress narration
+repeated tool calls
+exploration of multiple alternatives before committing
+```
+
+Blocking questions, missing requirements, and ambiguous choices must be
+front\-loaded\. Place every blocking question, the necessary context, and
+the available options together at the start of the response in one batch\.
+Do not split questions across multiple turns\.
+
+When there is no blocking question, return the final result directly\.
+Do not narrate the path taken\.
+
+---
+
+## Context and Command Output Discipline
+
+Search before reading\. Read before guessing\.
+
+File discovery:
+
+```Plain Text
+prefer rg --files for listing
+prefer rg -n for locating symbols, lines, and matches
+never walk the repository aimlessly
+```
+
+Reading scope:
+
+```Plain Text
+only files directly relevant to the current task
+no bulk reading of docs, logs, configs, or source by default
+when in doubt, narrow the scope, do not widen it
+```
+
+Reading technique:
+
+```Plain Text
+1. locate first with rg -n
+2. read only the lines around the match
+3. widen the window only when the context is insufficient
+```
+
+Command output limits:
+
+```Plain Text
+default cap = 100 lines
+logs = last 100 lines by default
+large output must be filtered, counted, or summarized first
+never dump full output blindly
+```
+
+Tests:
+
+```Plain Text
+default = minimum relevant tests
+full suite only when truly required
+```
+
+Truncation honesty:
+
+```Plain Text
+if output is truncated, state it explicitly
+never present truncated output as the complete result
+```
+
+---
+
 ## AI Agent Working Rule
 
 When assigned a feature:
