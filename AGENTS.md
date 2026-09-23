@@ -1016,55 +1016,16 @@ Do not narrate the path taken\.
 
 ---
 
-## Context and Command Output Discipline
-
-Search before reading\. Read before guessing\.
-
-File discovery:
+## 上下文与命令输出纪律
 
 ```Plain Text
-prefer rg --files for listing
-prefer rg -n for locating symbols, lines, and matches
-never walk the repository aimlessly
-```
-
-Reading scope:
-
-```Plain Text
-only files directly relevant to the current task
-no bulk reading of docs, logs, configs, or source by default
-when in doubt, narrow the scope, do not widen it
-```
-
-Reading technique:
-
-```Plain Text
-1. locate first with rg -n
-2. read only the lines around the match
-3. widen the window only when the context is insufficient
-```
-
-Command output limits:
-
-```Plain Text
-default cap = 100 lines
-logs = last 100 lines by default
-large output must be filtered, counted, or summarized first
-never dump full output blindly
-```
-
-Tests:
-
-```Plain Text
-default = minimum relevant tests
-full suite only when truly required
-```
-
-Truncation honesty:
-
-```Plain Text
-if output is truncated, state it explicitly
-never present truncated output as the complete result
+查找文件优先使用 rg --files、rg -n，禁止无目的遍历整个仓库。
+只读取与当前任务直接相关的文件；禁止默认读取全部文档、日志、配置或源码。
+读取文件先定位再截取：优先 rg -n，随后仅读取命中位置附近必要行。
+命令输出默认限制为 100 行；日志默认只读取末尾 100 行。
+大型输出必须先过滤、计数或汇总，禁止直接完整打印。
+测试默认运行最小相关测试；需要全量测试时再执行。
+输出被截断时必须明确说明，不得将截断结果当作完整结果。
 ```
 
 ---
