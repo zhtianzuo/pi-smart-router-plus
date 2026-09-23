@@ -196,6 +196,8 @@ describe('getSmartRouterArgumentCompletions', () => {
       'doctor',
       'plus-status',
       'risk',
+      'balance',
+      'balance --refresh',
     ]);
   });
 

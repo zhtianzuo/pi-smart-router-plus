@@ -2,6 +2,7 @@ import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { join } from 'node:path';
 
 import {
+  formatBalanceMessage,
   formatDoctorMessage,
   formatHistoryMessage,
   formatPlacementPlanMessage,
@@ -23,7 +24,7 @@ import { FLEET_MODE_ENTRY_TYPE } from './session-lifecycle.js';
 import type { SmartRouterRuntime } from './types.js';
 
 export const SMART_ROUTER_USAGE =
-  '/smart-router [status] | history [limit] | stats [limit] | mode scoped|all | pricing refresh | export dataset [--limit N] | export telemetry-contrib [--limit N] [--embeddings] | feedback good|bad | unpin | plan [--json] | doctor | plus-status | risk';
+  '/smart-router [status] | history [limit] | stats [limit] | mode scoped|all | pricing refresh | export dataset [--limit N] | export telemetry-contrib [--limit N] [--embeddings] | feedback good|bad | unpin | plan [--json] | doctor | plus-status | risk | balance [--refresh]';
 
 type CompletionItem = { value: string; label: string };
 
@@ -40,6 +41,8 @@ const TOP_LEVEL: CompletionItem[] = [
   { value: 'doctor', label: 'Read-only local readiness checklist' },
   { value: 'plus-status', label: 'Show Plus feature flags (Risk Guard, Planner Read-only)' },
   { value: 'risk', label: 'Show Risk Guard level and reasons for the last task' },
+  { value: 'balance', label: 'Show account balance / depletion state' },
+  { value: 'balance --refresh', label: 'Probe provider balances now (balance probe must be enabled)' },
 ];
 
 const MODE_COMPLETIONS: CompletionItem[] = [
@@ -84,6 +87,8 @@ export const SMART_ROUTER_FULL_INVOCATIONS = [
   'doctor',
   'plus-status',
   'risk',
+  'balance',
+  'balance --refresh',
 ] as const;
 
 function filterByPrefix(items: CompletionItem[], prefix: string): CompletionItem[] {
@@ -195,6 +200,28 @@ export function registerSmartRouterCommand(
             formatRiskMessage(runtime, ctx.sessionManager.getSessionId()),
             'info',
           );
+          return;
+        }
+
+        if (parsed.command === 'balance') {
+          const plus = runtime.plus;
+          if (!plus) {
+            ctx.ui.notify('Plus layer unavailable.', 'error');
+            return;
+          }
+          if (parsed.refresh) {
+            if (!plus.config.balanceProbe) {
+              ctx.ui.notify(
+                'Balance probe is OFF (opt-in). Enable with SMART_ROUTER_PLUS_BALANCE_PROBE=1.',
+                'info',
+              );
+            } else {
+              throwIfCommandAborted(signal);
+              await plus.probeBalances(runtime.streamDeps.fleet, ctx.modelRegistry);
+              throwIfCommandAborted(signal);
+            }
+          }
+          ctx.ui.notify(formatBalanceMessage(runtime), 'info');
           return;
         }
 

@@ -3,6 +3,10 @@
     "riskGuard": true,
     "plannerReadOnly": true,
     "verification": false,
-    "reviewer": false
+    "reviewer": false,
+    "balanceGuard": true,
+    "balanceProbe": false,
+    "minBalance": 0,
+    "balanceProbeTtlSeconds": 600
   }
 }

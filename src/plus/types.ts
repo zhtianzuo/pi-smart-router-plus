@@ -29,6 +29,14 @@ export interface PlusConfig {
   readonly plannerReadOnly: boolean;
   readonly verification: boolean;
   readonly reviewer: boolean;
+  /** P1: error-driven depletion guard. Local, deterministic, zero network. */
+  readonly balanceGuard: boolean;
+  /** P2: active provider balance probe (network). Off by default. */
+  readonly balanceProbe: boolean;
+  /** Minimum acceptable balance before an account is treated as low. */
+  readonly minBalance: number;
+  /** Minimum interval between two P2 probe rounds, in seconds. */
+  readonly balanceProbeTtlSeconds: number;
 }
 
 export const DEFAULT_PLUS_CONFIG: Readonly<PlusConfig> = {
@@ -36,6 +44,10 @@ export const DEFAULT_PLUS_CONFIG: Readonly<PlusConfig> = {
   plannerReadOnly: true,
   verification: false,
   reviewer: false,
+  balanceGuard: true,
+  balanceProbe: false,
+  minBalance: 0,
+  balanceProbeTtlSeconds: 600,
 };
 
 /** Input surface for local risk classification. */

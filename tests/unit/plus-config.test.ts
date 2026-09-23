@@ -30,6 +30,10 @@ describe('Plus config', () => {
       plannerReadOnly: true,
       verification: false,
       reviewer: false,
+      balanceGuard: true,
+      balanceProbe: false,
+      minBalance: 0,
+      balanceProbeTtlSeconds: 600,
     });
     expect(resolvePlusConfig({ cwd: dir, env: {} })).toEqual(DEFAULT_PLUS_CONFIG);
   });
@@ -47,6 +51,7 @@ describe('Plus config', () => {
     const config = resolvePlusConfig({ cwd: dir, env: {} });
 
     expect(config).toEqual({
+      ...DEFAULT_PLUS_CONFIG,
       riskGuard: false,
       plannerReadOnly: false,
       verification: true,
@@ -68,8 +73,8 @@ describe('Plus config', () => {
     });
 
     expect(config).toEqual({
+      ...DEFAULT_PLUS_CONFIG,
       riskGuard: false,
-      plannerReadOnly: true,
       verification: true,
       reviewer: true,
     });
@@ -104,6 +109,7 @@ describe('Plus config', () => {
     });
 
     expect(config).toEqual({
+      ...DEFAULT_PLUS_CONFIG,
       riskGuard: false,
       plannerReadOnly: false,
       verification: true,
@@ -150,6 +156,10 @@ describe('Plus config', () => {
 
     expect(config).toEqual(DEFAULT_PLUS_CONFIG);
     expect(Object.keys(config).sort()).toEqual([
+      'balanceGuard',
+      'balanceProbe',
+      'balanceProbeTtlSeconds',
+      'minBalance',
       'plannerReadOnly',
       'reviewer',
       'riskGuard',

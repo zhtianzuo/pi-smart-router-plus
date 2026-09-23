@@ -364,6 +364,16 @@ export async function routeAndDelegate(
     guardResult = resolveEffectiveFleet(deps.fleet, request, context.messages);
     effectiveFleet = guardResult.effectiveFleet;
     assertRoutableFleetAfterGeminiToolHistoryGuard(guardResult);
+    // Plus: Depletion Guard (P1) marks depleted accounts unhealthy for this
+    // request; the opt-in Balance Probe (P2) refreshes in the background and
+    // never blocks routing (fire-and-forget, applied from the next turn).
+    if (deps.plus) {
+      effectiveFleet = await deps.plus.applyBalancePolicy(
+        effectiveFleet,
+        deps.modelRegistry,
+      );
+      deps.plus.refreshBalances(deps.fleet, deps.modelRegistry);
+    }
     if (guardResult.excluded) {
       console.warn(
         '[smart-router] gemini tool history guard applied',
@@ -682,6 +692,21 @@ export async function routeAndDelegate(
 
       if (result.failed && result.finalMessage) {
         const providerError = resolveFailoverProviderError(result.finalMessage);
+        // Plus: an account-level billing/quota rejection is remembered so the
+        // next request avoids the account instead of wasting another call.
+        if (deps.plus) {
+          const rawErrorMessage = result.finalMessage.errorMessage;
+          const errorShape =
+            providerError ?? (rawErrorMessage ? { message: rawErrorMessage } : undefined);
+          if (errorShape) {
+            void deps.plus.recordProviderError(
+              { provider: targetModel.provider, id: targetModel.id },
+              errorShape,
+              deps.modelRegistry,
+              rawErrorMessage,
+            );
+          }
+        }
         const failedProfile = findFleetProfile(effectiveFleet, targetModel.id);
         if (
           providerError &&
@@ -745,6 +770,15 @@ export async function routeAndDelegate(
       }
 
       deps.router.dispatch.recordOutcome(targetModel.id, { code: 'STREAM_DELEGATION_ERROR' });
+
+      // Plus: a thrown delegation error can still be a billing/quota rejection.
+      if (deps.plus) {
+        void deps.plus.recordProviderError(
+          { provider: targetModel.provider, id: targetModel.id },
+          { message: error instanceof Error ? error.message : String(error) },
+          deps.modelRegistry,
+        );
+      }
 
       if (!failedModelIds.includes(targetModel.id)) {
         failedModelIds.push(targetModel.id);

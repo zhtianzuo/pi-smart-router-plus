@@ -30,13 +30,15 @@ Keep upstream mergeable.
 
 ---
 
-## 实现状态（v0.1.0 / MVP）
+## 实现状态（v0.1.1）
 
 | 能力 | 状态 | 默认 | 说明 |
 | --- | --- | --- | --- |
 | Risk Guard | ✅ 已实现 | ON | 纯本地确定性规则，零 LLM 调用 |
 | Planner Read-only Guard | ✅ 已实现 | ON | 工具层拦截 + `getActiveTools`/`setActiveTools` try/finally 恢复 |
-| 状态显示 | ✅ 已实现 | — | `/smart-router plus-status`、`/smart-router risk` |
+| Depletion Guard（余额/额度耗尽，P1） | ✅ 已实现 | ON | 错误驱动，按 `provider + 凭据指纹` 隔离，纯本地零网络 |
+| Balance Probe（主动查余额，P2） | ✅ 已实现 | **OFF（opt-in）** | 仅 DeepSeek / OpenRouter / MiniMax Token Plan 官方接口 |
+| 状态显示 | ✅ 已实现 | — | `/smart-router plus-status`、`/smart-router risk`、`/smart-router balance` |
 | Verification Policy | ⏳ Phase 2 | OFF | 接口已定义（`VerificationResult`），尚未接线 |
 | Optional Reviewer | ⏳ Phase 3 | OFF | 接口已定义（`ReviewResult`），尚未接线 |
 
@@ -45,6 +47,11 @@ Keep upstream mergeable.
 ```Plain Text
 src/plus/risk-guard.ts          # 风险分类 + 路由策略（turn_type 规划升级）
 src/plus/planner-readonly.ts    # 工具层只读窗口 + shell 只读白名单
+src/plus/depletion-guard.ts     # 余额/额度耗尽的确定性分类 + fleet 策略
+src/plus/balance-types.ts       # 余额相关类型
+src/plus/balance-state.ts       # 凭据指纹 + 边车状态（TTL、原子写、fail-open）
+src/plus/balance-adapters.ts    # DeepSeek / OpenRouter / MiniMax 探测适配器
+src/plus/balance-probe.ts       # P2 探测编排（TTL、in-flight、fail-open）
 src/plus/task-state.ts          # 单任务状态 + 状态格式化
 src/plus/config.ts              # Plus 配置解析
 src/plus/runtime.ts             # Plus 组合根
@@ -67,7 +74,11 @@ src/plus/types.ts               # 共享类型 + 默认值
     "riskGuard": true,
     "plannerReadOnly": true,
     "verification": false,
-    "reviewer": false
+    "reviewer": false,
+    "balanceGuard": true,
+    "balanceProbe": false,
+    "minBalance": 0,
+    "balanceProbeTtlSeconds": 600
   }
 }
 ```
@@ -79,19 +90,85 @@ SMART_ROUTER_PLUS_RISK_GUARD=0|1
 SMART_ROUTER_PLUS_PLANNER_READONLY=0|1
 SMART_ROUTER_PLUS_VERIFICATION=0|1
 SMART_ROUTER_PLUS_REVIEWER=0|1
+SMART_ROUTER_PLUS_BALANCE_GUARD=0|1
+SMART_ROUTER_PLUS_BALANCE_PROBE=0|1
+SMART_ROUTER_PLUS_MIN_BALANCE=<number>
+SMART_ROUTER_PLUS_BALANCE_PROBE_TTL_SECONDS=<number>
 ```
 
-路由影响（复用上游 planning 机制，不新增第二套 Planner）：
+路由影响（复用上游 planning 机制与 `ModelProfile.healthy`，不新增第二套 Planner/Router）：
 
 ```Plain Text
 LOW    → 完全不改上游决策
 MEDIUM → 在 planning-eligible 轮次提升 planning 倾向
 HIGH   → 在 planning-eligible 轮次强制 planning
+账号耗尽/偏低 → 该 provider 的模型标记 healthy:false（若会导致候选为空则 fail-open）
 ```
 
 `tool_result` / `subagent` 执行轮永远不会被改写，因此高风险任务仍然是"强模型 Planning + 最便宜可用模型执行"。
 
-成本约束：Risk Guard 与 Planner Read-only Guard 均不产生任何额外模型调用；Reviewer/Verification 默认关闭。
+成本约束：Risk Guard / Planner Read-only Guard / Depletion Guard 均不产生任何额外模型调用；Balance Probe（P2）默认关闭。
+
+---
+
+## 余额 / 额度感知调度
+
+目标：**某个 model 的账号余额为零或接近零时，尽量改用别的模型**，而不是每次都先浪费一次失败调用。
+
+### 复用上游已有能力（不重写）
+
+| 上游机制 | 上游行为 | Plus 补什么 |
+| --- | --- | --- |
+| `shouldFailoverOnProviderError` | 仅当次 failover，不落记忆 | 记住耗尽状态并影响**下一次**路由 |
+| `CircuitBreaker` | 内存 30s，且**余额类错误不算 infra** | 余额/额度类错误单独归类，TTL 更长 |
+| `RateLimitPort` | 请求速率令牌桶，不是余额 | 不重复实现 |
+| `quota-window-feed` / `virtual-cost-v2` | 只影响成本估算 | 不重复实现 |
+| **`ModelProfile.healthy === false`** | **全链路已尊重**（context-fit / expected-cost / 子路由 / 会话 pin / loop-escalation / safe-default） | Plus 直接把耗尽账号标成 unhealthy，不新增评分机制 |
+| Pi 余额元数据 | **不存在** | Plus 自己获取（错误驱动 + 可选探测） |
+
+### P1 Depletion Guard（默认 ON，零网络、零 LLM）
+
+- 分类两类，TTL 不同：
+  - `billing_depleted`（402 / insufficient balance·quota / no credits / 余额不足·欠费…）→ **6 小时**
+  - `quota_window_exhausted`（订阅 usage limit / quota exhausted / `resource_exhausted` / 配额已用尽…）→ **30 分钟**
+- **不会**把普通 429 `rate limit reached`、401/403 鉴权失败、5xx 误判为余额耗尽（429 已有上游熔断器处理）。
+- 应用点：`routeAndDelegate` 里已有的 `effectiveFleet`，把耗尽 provider 的模型克隆为 `healthy:false`。
+- **fail-open**：若排除后候选为空，自动回退全量并告警——Plus 不可能把路由卡死。
+
+### 账号隔离（provider + 凭据非敏感指纹）
+
+- 状态键 = `provider|<fp>`，`fp` = `SHA-256(apiKey)` 截断前 12 位十六进制（`fp_xxxxxxxxxxxx`）。
+- **API Key 本身不落盘、不写日志**；出错详情经 `sanitizeDetail()` 脱敏（`sk-*`、`Bearer *`、`api_key=*`、≥ 32 位长串→ `[redacted]`），再截断到 160 字符。
+- 同一 provider 的两个账号互不影响；换 Key 后 `fp` 变化，旧账号的耗尽状态自动不再命中。
+
+### P2 Balance Probe（默认 OFF，显式启用）
+
+只接**官方文档有据**的接口：
+
+| provider | 接口 | 说明 |
+| --- | --- | --- |
+| `deepseek` | `GET https://api.deepseek.com/user/balance` | `is_available` / `balance_infos[].total_balance` |
+| `openrouter` | `GET https://openrouter.ai/api/v1/credits` | `total_credits - total_usage`（需 management key） |
+| `minimax-cn` | `GET https://www.minimax.cn/v1/token_plan/remains` | 仅 Token Plan 剩余额度；**官方未公布响应字段** |
+| `openai` / `openai-codex` / `anthropic` | — | **无官方余额接口**（订阅制/无余额 API），只能靠 P1 错误驱动 |
+
+行为与安全边界：
+
+- 触发时机：会话路由时后台刷新 + TTL（默认 600s）；`maybeRefresh()` **fire-and-forget，不阻塞 TTFT**。
+- 单次请求超时 3s；`/smart-router balance --refresh` 可显式立即探测（此时会等待）。
+- 凭据只通过 pi 官方 `modelRegistry.getApiKeyForProvider()` 获取，只进 `Authorization` 头，不落盘不打印。
+- **任何异常都 fail-open**：非订阅 Key、401/403/404、限流、5xx、非 JSON、超时、响应结构不认识 → **不改变任何状态**（只用「解析成功」的结果）。
+- MiniMax 响应字段官方未公布，因此做**容错解析**（深度/键数受限地收集“剩余/额度”类数值字段并取最小值，即 5 小时窗口与周窗口中的约束者）；识别不了就什么都不做。启用后请用 `/smart-router balance` 核对一次结果是否符合预期。
+
+### 命令与状态
+
+```Plain Text
+/smart-router balance             # 账号级余额/耗尽状态（含指纹、TTL、来源、detail）
+/smart-router balance --refresh   # 立即探测（需先启用 P2）
+/smart-router plus-status         # 只看简要：Balance Guard / Balance Probe / Blocked accounts: N
+```
+
+状态文件：`.pi-smart-router/plus-balance.json`（Plus 自有边车，原子写；损坏/不可写一律 fail-open，不改上游 SQLite schema）。
 
 ---
 

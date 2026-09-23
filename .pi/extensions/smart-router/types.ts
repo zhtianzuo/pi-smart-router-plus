@@ -50,7 +50,8 @@ export type SmartRouterCommand =
   | { command: 'feedback'; rating: 'good' | 'bad' }
   | { command: 'unpin' }
   | { command: 'plus-status' }
-  | { command: 'risk' };
+  | { command: 'risk' }
+  | { command: 'balance'; refresh: boolean };
 
 /** Provider stream delegate; defaults to pi-ai streamSimple when omitted. */
 export type DelegateStreamFn = (

@@ -4,9 +4,13 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { DEFAULT_PLUS_CONFIG } from '../../src/index.js';
+import {
+  DEFAULT_PLUS_CONFIG,
+  type BalanceEntry,
+} from '../../src/index.js';
 import {
   PlusTaskState,
+  formatBalanceReport,
   formatPlusStatus,
   formatRiskReport,
 } from '../../src/plus/task-state.js';
@@ -15,6 +19,7 @@ import {
   SMART_ROUTER_USAGE,
 } from '../../.pi/extensions/smart-router/commands.js';
 import {
+  formatBalanceMessage,
   formatPlusStatusMessage,
   formatRiskMessage,
   parseSmartRouterArgs,
@@ -97,6 +102,7 @@ describe('Plus status formatting', () => {
 
   it('reports disabled flags', () => {
     const text = formatPlusStatus({
+      ...DEFAULT_PLUS_CONFIG,
       riskGuard: false,
       plannerReadOnly: false,
       verification: true,
@@ -155,14 +161,24 @@ describe('Plus command parsing', () => {
     expect(parseSmartRouterArgs('risk')).toEqual({ command: 'risk' });
   });
 
+  it('parses balance and balance --refresh', () => {
+    expect(parseSmartRouterArgs('balance')).toEqual({ command: 'balance', refresh: false });
+    expect(parseSmartRouterArgs('balance --refresh')).toEqual({
+      command: 'balance',
+      refresh: true,
+    });
+  });
+
   it('rejects trailing arguments', () => {
     expect(() => parseSmartRouterArgs('plus-status now')).toThrow(/Usage:/);
     expect(() => parseSmartRouterArgs('risk high')).toThrow(/Usage:/);
+    expect(() => parseSmartRouterArgs('balance --now')).toThrow(/Usage:/);
   });
 
   it('documents the new subcommands in usage text', () => {
     expect(SMART_ROUTER_USAGE).toContain('plus-status');
     expect(SMART_ROUTER_USAGE).toContain('risk');
+    expect(SMART_ROUTER_USAGE).toContain('balance');
   });
 
   it('keeps completions and parsing in sync for every invocation', () => {
@@ -193,5 +209,76 @@ describe('Plus command formatting against a runtime', () => {
 
     expect(formatPlusStatusMessage(runtime, 's1')).toContain('Last task risk: HIGH');
     expect(formatRiskMessage(runtime, 's1')).toBe('Risk: HIGH\n\nReasons:\n- force push');
+  });
+
+  it('briefs balance state in plus-status', () => {
+    const entry: BalanceEntry = {
+      provider: 'deepseek',
+      fingerprint: 'fp_0123456789ab',
+      status: 'depleted',
+      reason: 'billing_depleted',
+      source: 'error',
+      observedAt: new Date(0).toISOString(),
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      modelIds: ['deepseek-v4-pro'],
+      balance: null,
+      detail: null,
+    };
+    const runtime = fakeRuntime({
+      config: DEFAULT_PLUS_CONFIG,
+      taskState: new PlusTaskState(),
+      blockedAccounts: () => [entry],
+    });
+
+    const text = formatPlusStatusMessage(runtime, 's1');
+    expect(text).toContain('Balance Guard: ON');
+    expect(text).toContain('Balance Probe: OFF');
+    expect(text).toContain('Blocked accounts: 1 (deepseek:DEPLETED)');
+  });
+
+  it('renders the balance report', () => {
+    const entry: BalanceEntry = {
+      provider: 'deepseek',
+      fingerprint: 'fp_0123456789ab',
+      status: 'depleted',
+      reason: 'billing_depleted',
+      source: 'error',
+      observedAt: new Date(0).toISOString(),
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      modelIds: ['deepseek-v4-pro'],
+      balance: { currency: 'CNY', total: '0.00', available: false },
+      detail: 'insufficient balance',
+    };
+
+    const text = formatBalanceReport([entry], {
+      guardEnabled: true,
+      probeEnabled: false,
+      probedProviders: ['deepseek', 'openrouter', 'minimax-cn'],
+    });
+
+    expect(text).toContain('Balance Guard (P1, local): ON');
+    expect(text).toContain('Balance Probe (P2, network): OFF');
+    expect(text).toContain('Accounts in cooldown: 1');
+    expect(text).toContain('deepseek | fp_0123456789ab | DEPLETED | billing_depleted');
+    expect(text).toContain('balance: 0.00 CNY');
+    expect(text).toContain('detail: insufficient balance');
+    expect(text).toContain('Enable with SMART_ROUTER_PLUS_BALANCE_PROBE=1');
+  });
+
+  it('renders an OK balance report when nothing is recorded', () => {
+    const text = formatBalanceReport([], {
+      guardEnabled: true,
+      probeEnabled: true,
+      probedProviders: ['deepseek'],
+    });
+    expect(text).toContain('Accounts: no depletion recorded (OK)');
+  });
+
+  it('formats the balance command against a runtime', () => {
+    const runtime = fakeRuntime({
+      config: DEFAULT_PLUS_CONFIG,
+      balanceEntries: () => [],
+    });
+    expect(formatBalanceMessage(runtime)).toContain('Balance Probe (P2, network): OFF');
   });
 });

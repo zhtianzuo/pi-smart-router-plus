@@ -12,6 +12,7 @@ import {
   type PlusTaskSnapshot,
   type RiskDecision,
 } from './types.js';
+import type { BalanceEntry } from './balance-types.js';
 
 const DEFAULT_TASK_KEY = 'default';
 
@@ -133,19 +134,31 @@ function onOff(value: boolean): string {
 
 /**
  * `/smart-router plus-status` output. The first four lines are the documented
- * Plus status block; task detail is appended only when a task has been seen.
+ * Plus status block; balance and task detail are appended after it.
  */
 export function formatPlusStatus(
   config: PlusConfig,
   snapshot?: PlusTaskSnapshot | undefined,
+  blocked?: readonly BalanceEntry[] | undefined,
 ): string {
   const lines = [
     `Risk Guard: ${onOff(config.riskGuard)}`,
     `Planner Read-only: ${onOff(config.plannerReadOnly)}`,
     `Verification: ${onOff(config.verification)}`,
     `Reviewer: ${onOff(config.reviewer)}`,
+    `Balance Guard: ${onOff(config.balanceGuard)}`,
+    `Balance Probe: ${onOff(config.balanceProbe)}`,
     `Plus version: ${PLUS_VERSION}`,
   ];
+
+  const blockedEntries = blocked ?? [];
+  lines.push(
+    blockedEntries.length === 0
+      ? 'Blocked accounts: none'
+      : `Blocked accounts: ${blockedEntries.length} (${blockedEntries
+          .map((entry) => `${entry.provider}:${entry.status.toUpperCase()}`)
+          .join(', ')})`,
+  );
 
   if (snapshot) {
     lines.push(`Last task risk: ${snapshot.risk.level.toUpperCase()}`);
@@ -173,4 +186,72 @@ export function formatRiskReport(snapshot?: PlusTaskSnapshot | undefined): strin
   const reasons =
     risk.reasons.length > 0 ? risk.reasons.map((reason) => `- ${reason}`) : ['- (none)'];
   return [`Risk: ${risk.level.toUpperCase()}`, '', 'Reasons:', ...reasons].join('\n');
+}
+
+export interface FormatBalanceReportOptions {
+  readonly guardEnabled: boolean;
+  readonly probeEnabled: boolean;
+  /** Providers that have a documented balance endpoint. */
+  readonly probedProviders: readonly string[];
+  readonly now?: number | undefined;
+}
+
+/**
+ * `/smart-router balance` output.
+ *
+ * Shows only account-level, non-sensitive data: provider, credential
+ * fingerprint (truncated hash), status, reason, source, balance and expiry.
+ */
+export function formatBalanceReport(
+  entries: readonly BalanceEntry[],
+  options: FormatBalanceReportOptions,
+): string {
+  const lines = [
+    `Balance Guard (P1, local): ${onOff(options.guardEnabled)}`,
+    `Balance Probe (P2, network): ${onOff(options.probeEnabled)}`,
+  ];
+
+  if (!options.probeEnabled) {
+    lines.push(
+      'Probe providers available: ' +
+        (options.probedProviders.length > 0
+          ? options.probedProviders.join(', ')
+          : '(none)'),
+      'Enable with SMART_ROUTER_PLUS_BALANCE_PROBE=1 (or "balanceProbe": true in config/plus.json)',
+    );
+  } else {
+    lines.push(
+      'Probed providers: ' +
+        (options.probedProviders.length > 0
+          ? options.probedProviders.join(', ')
+          : '(none)'),
+    );
+  }
+
+  const blocked = entries.filter((entry) => entry.status !== 'ok');
+  if (blocked.length === 0) {
+    lines.push('', 'Accounts: no depletion recorded (OK)');
+    return lines.join('\n');
+  }
+
+  const now = options.now ?? Date.now();
+  lines.push('', `Accounts in cooldown: ${blocked.length}`);
+  for (const entry of blocked) {
+    const remainingMs = Date.parse(entry.expiresAt) - now;
+    const remainingMin = Number.isFinite(remainingMs)
+      ? Math.max(0, Math.round(remainingMs / 60_000))
+      : null;
+    const balance = entry.balance
+      ? `${entry.balance.total} ${entry.balance.currency}`
+      : 'unknown';
+    lines.push(
+      `- ${entry.provider} | ${entry.fingerprint} | ${entry.status.toUpperCase()} | ${entry.reason}`,
+      `  models: ${entry.modelIds.length > 0 ? entry.modelIds.join(', ') : '(unknown)'}`,
+      `  source: ${entry.source} | balance: ${balance}` +
+        (remainingMin !== null ? ` | expires in: ${remainingMin}m` : ''),
+      `  observed: ${entry.observedAt}` +
+        (entry.detail ? ` | detail: ${entry.detail}` : ''),
+    );
+  }
+  return lines.join('\n');
 }

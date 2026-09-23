@@ -2,8 +2,10 @@ import {
   DEFAULT_HISTORY_LIMIT,
   MAX_HISTORY_LIMIT,
   aggregateSessionStatsFromFleet,
+  BALANCE_PROBE_ADAPTERS,
   DEFAULT_PLUS_CONFIG,
   DEFAULT_TELEMETRY_CONTRIB_EXPORT_LIMIT,
+  formatBalanceReport,
   formatPlusStatus,
   formatRiskReport,
   parseExportTelemetryContribArgs,
@@ -212,6 +214,10 @@ export function parseSmartRouterArgs(args: string): ParsedSmartRouterCommand {
     return { command: 'risk' };
   }
 
+  if (tokens[0] === 'balance' && (tokens.length === 1 || (tokens.length === 2 && tokens[1] === '--refresh'))) {
+    return { command: 'balance', refresh: tokens[1] === '--refresh' };
+  }
+
   throw new Error(`Usage: ${SMART_ROUTER_USAGE}`);
 }
 
@@ -223,7 +229,8 @@ export function formatPlusStatusMessage(
   const plus = runtime.plus;
   const config = plus?.config ?? DEFAULT_PLUS_CONFIG;
   const snapshot = plus?.taskState.get(sessionId);
-  return formatPlusStatus(config, snapshot);
+  const blocked = typeof plus?.blockedAccounts === 'function' ? plus.blockedAccounts() : [];
+  return formatPlusStatus(config, snapshot, blocked);
 }
 
 /** `/smart-router risk` — risk level and reasons for the last task. */
@@ -232,6 +239,19 @@ export function formatRiskMessage(
   sessionId?: string | undefined,
 ): string {
   return formatRiskReport(runtime.plus?.taskState.get(sessionId));
+}
+
+/** `/smart-router balance` — account-level balance / depletion state. */
+export function formatBalanceMessage(runtime: SmartRouterRuntime): string {
+  const plus = runtime.plus;
+  const config = plus?.config ?? DEFAULT_PLUS_CONFIG;
+  const entries =
+    typeof plus?.balanceEntries === 'function' ? plus.balanceEntries() : [];
+  return formatBalanceReport(entries, {
+    guardEnabled: config.balanceGuard,
+    probeEnabled: config.balanceProbe,
+    probedProviders: BALANCE_PROBE_ADAPTERS.map((adapter) => adapter.provider),
+  });
 }
 
 export function formatStatusMessage(
