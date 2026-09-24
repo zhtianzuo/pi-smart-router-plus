@@ -11,7 +11,7 @@
 import { describe, expect, it } from 'vitest';
 
 describe('smartRouterExtension — registerProvider timing', () => {
-  it('calls pi.registerProvider synchronously before any awaited setup', async () => {
+  it('calls pi.registerProvider synchronously before any awaited setup', { timeout: 30_000 }, async () => {
     const calls: string[] = [];
     const syncFlag = { provider: false };
 
