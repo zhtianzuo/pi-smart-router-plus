@@ -26,7 +26,12 @@ function abiOf(nodeBin: string): string {
 }
 
 function runGuard(
-  options: { node?: string | undefined; piNode?: string | undefined; pathNode?: string; args?: string[] } = {},
+  options: {
+    node?: string | undefined;
+    piNode?: string | undefined;
+    pathNode?: string | undefined;
+    args?: string[];
+  } = {},
 ) {
   const node = options.node ?? process.execPath;
   const env: NodeJS.ProcessEnv = {

@@ -47,8 +47,23 @@ function whichOnPath(name) {
   return null;
 }
 
-/** Follow `pi` launcher wrappers (bash wrapper → node shebang) to find its Node. */
-function resolveNodeFromLauncher(start, depth = 0) {
+/** Every `pi` launcher on PATH, in PATH order (a devDependency `.bin` shim may come first). */
+function listLaunchersOnPath(name) {
+  const found = [];
+  for (const dir of (process.env.PATH ?? '').split(':')) {
+    if (!dir) continue;
+    const candidate = join(dir, name);
+    if (existsSync(candidate)) found.push(candidate);
+  }
+  return found;
+}
+
+/**
+ * Follow `pi` launcher wrappers (bash wrapper → node shebang) to find its Node.
+ * `viaEnv` marks launchers that only resolve through `#!/usr/bin/env node`, i.e.
+ * whose Node is whatever `node` happens to be first on PATH.
+ */
+function resolveNodeSource(start, depth = 0) {
   if (depth > 4 || !existsSync(start) || !statSync(start).isFile()) {
     return null;
   }
@@ -58,27 +73,35 @@ function resolveNodeFromLauncher(start, depth = 0) {
   }
   const target = line.slice(2).trim().split(/\s+/)[0] ?? '';
   if (target.endsWith('/env')) {
-    return whichOnPath('node');
+    return { bin: whichOnPath('node'), viaEnv: true };
   }
   if (isAbsolute(target) && isNodeBinary(target)) {
-    return target;
+    return { bin: target, viaEnv: false };
   }
   // Shell wrapper (e.g. Homebrew) — follow its `exec "<path>"` target.
   const execMatch = /^[^\n]*\bexec\s+"?([^"'\s]+)"?/m.exec(readFileSync(start, 'utf8'));
   if (execMatch?.[1]) {
     const next = resolve(dirname(start), execMatch[1]);
-    return isNodeBinary(next) ? next : resolveNodeFromLauncher(next, depth + 1);
+    return isNodeBinary(next) ? { bin: next, viaEnv: false } : resolveNodeSource(next, depth + 1);
   }
   return null;
 }
 
+/**
+ * Pi's Node: an explicit override, else the first `pi` launcher on PATH that
+ * pins an absolute Node (a `.bin` shim resolving via `env node` is only a
+ * fallback, since that Node is already checked as the PATH candidate).
+ */
 function resolvePiNode() {
   const configured = process.env.SMART_ROUTER_PI_NODE?.trim();
   if (configured) {
     return existsSync(configured) ? configured : null;
   }
-  const launcher = whichOnPath('pi');
-  return launcher ? resolveNodeFromLauncher(launcher) : null;
+  const sources = listLaunchersOnPath('pi')
+    .map((launcher) => resolveNodeSource(launcher))
+    .filter((source) => source?.bin);
+  const preferred = sources.find((source) => !source.viaEnv) ?? sources[0];
+  return preferred?.bin ?? null;
 }
 
 const piNode = resolvePiNode();
@@ -117,8 +140,8 @@ function canLoadNativeModule(nodeBin) {
   });
   if (result.status === 0) return { ok: true, detail: '' };
   const stderr = (result.stderr || result.stdout || 'unknown error').trim();
-  // The ABI complaint is on its own line; the require trace follows it.
-  const detail = stderr.split('\n').find((line) => line.trim().length > 0) ?? 'unknown error';
+  const lines = stderr.split('\n').map((line) => line.trim()).filter((line) => line.length > 0);
+  const detail = lines.find((line) => /NODE_MODULE_VERSION|compiled against/.test(line)) ?? lines[0] ?? 'unknown error';
   return { ok: false, detail };
 }
 
