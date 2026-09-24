@@ -134,10 +134,14 @@ function canLoadNativeModule(nodeBin) {
     "const db = new Database(':memory:');",
     'db.close();',
   ].join(' ');
-  const result = spawnSync(nodeBin, ['-e', `try { ${script} } catch (error) { process.exit(3); }`], {
-    cwd: projectRoot,
-    encoding: 'utf8',
-  });
+  const result = spawnSync(
+    nodeBin,
+    [
+      '-e',
+      `try { ${script} } catch (error) { console.error(error && error.message ? error.message : String(error)); process.exit(3); }`,
+    ],
+    { cwd: projectRoot, encoding: 'utf8' },
+  );
   if (result.status === 0) return { ok: true, detail: '' };
   const stderr = (result.stderr || result.stdout || 'unknown error').trim();
   const lines = stderr.split('\n').map((line) => line.trim()).filter((line) => line.length > 0);
