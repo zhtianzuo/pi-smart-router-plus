@@ -1852,11 +1852,17 @@ smart-router  auto                    200K     16.4K    yes       yes
 
 ### 原生依赖 ABI 警告
 
-若启动时出现 `SQLite store open failed ... NODE_MODULE_VERSION`，说明 `better-sqlite3`
-是按与 `pi` 不同的 Node 版本编译的。Pi 会回退到内存 store（路由与 Risk Guard 不受影响，
-只是历史/统计不落盘）。用与 `pi` 相同的 Node 重新编译即可：
+若启动时出现 `SQLite store unavailable (native module load or transient lock) ... NODE_MODULE_VERSION`，
+说明 `better-sqlite3` 是按与 `pi` 不同的 Node 版本编译的。Pi 会回退到内存 store（路由、Risk Guard、
+Planner Read-only Guard 不受影响，只是历史/统计不落盘），**且不会重命名 `state.db`**（原生模块加载失败
+或另一个进程持有的临时锁不属于数据库损坏，见 `src/infrastructure/persistence/sqlite-store.ts`）。
+用与 `pi` 相同的 Node 重新编译即可：
 
 ```Bash
 head -1 "$(command -v pi)"        # 查看 pi 使用的 node（macOS Homebrew 示例）
 PATH="/opt/homebrew/opt/node/bin:$PATH" npm rebuild better-sqlite3
 ```
+
+开发/测试也必须使用 `pi` 使用的同一个 Node（本机：`/opt/homebrew/opt/node/bin/node`，v26 / ABI 147）。
+例如：`PATH="/opt/homebrew/opt/node/bin:$PATH" npm run verify:ci`；用其它大版本 Node 运行测试会
+因 ABI 不匹配出现整片原生模块失败。
