@@ -8,7 +8,7 @@
  *
  * Regression for FEISHU-VS-20260817#1 / docs/07-pi-rpc-stdin-extensions.md.
  */
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 describe('smartRouterExtension — registerProvider timing', () => {
   it('calls pi.registerProvider synchronously before any awaited setup', async () => {
@@ -16,11 +16,12 @@ describe('smartRouterExtension — registerProvider timing', () => {
     const syncFlag = { provider: false };
 
     const pi = {
-      registerProvider(name: string, _cfg: unknown) {
+      registerProvider(name: string, cfg: unknown) {
         if (name === 'smart-router') {
           syncFlag.provider = true;
         }
         calls.push(`registerProvider:${name}`);
+        void cfg;
       },
       registerCommand() {
         calls.push('registerCommand');
