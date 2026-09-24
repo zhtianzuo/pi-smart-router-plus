@@ -1860,8 +1860,13 @@ Planner Read-only Guard 不受影响，只是历史/统计不落盘），**且�
 
 ```Bash
 head -1 "$(command -v pi)"        # 查看 pi 使用的 node（macOS Homebrew 示例）
-PATH="/opt/homebrew/opt/node/bin:$PATH" npm rebuild better-sqlite3
+npm run native:rebuild            # 用 pi 的 Node 重编译 better-sqlite3，并复验
+# 手动等价写法：PATH="/opt/homebrew/opt/node/bin:$PATH" npm rebuild better-sqlite3
 ```
+
+仓库自带守卫：`npm test` / `npm run verify:ci` 会先确认 pi 与当前 Node 都能真正构造 `better-sqlite3`
+实例（原生模块是在 `new Database()` 时才加载的），不匹配会直接输出 `npm run native:rebuild`，
+而不是抛出一片 `NODE_MODULE_VERSION` 报错。若 `pi` 不在 PATH 中，可用 `SMART_ROUTER_PI_NODE=/path/to/node` 指定。
 
 开发/测试也必须使用 `pi` 使用的同一个 Node（本机：`/opt/homebrew/opt/node/bin/node`，v26 / ABI 147）。
 例如：`PATH="/opt/homebrew/opt/node/bin:$PATH" npm run verify:ci`；用其它大版本 Node 运行测试会

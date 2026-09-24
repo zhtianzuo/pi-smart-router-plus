@@ -718,6 +718,14 @@ npm install
 
 before installing the path package\.
 
+If `better-sqlite3` reports `NODE_MODULE_VERSION`, the native module was built for a
+different Node than the one running `pi`. Rebuild it with pi's own Node \(never with
+another Node on PATH\):
+
+```Bash
+npm run native:rebuild
+```
+
 Do not load both the npm version and local path version simultaneously\.
 
 Verify:
