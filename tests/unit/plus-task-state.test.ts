@@ -2,10 +2,12 @@
  * Plus task state, status formatting and command parsing tests.
  */
 
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 import {
   DEFAULT_PLUS_CONFIG,
+  PLUS_VERSION,
   type BalanceEntry,
 } from '../../src/index.js';
 import {
@@ -98,6 +100,15 @@ describe('Plus status formatting', () => {
       'Verification: OFF',
       'Reviewer: OFF',
     ]);
+  });
+
+  it('keeps the reported Plus version in sync with package.json', () => {
+    const pkg = JSON.parse(
+      readFileSync(new URL('../../package.json', import.meta.url), 'utf8'),
+    ) as { version: string };
+
+    expect(formatPlusStatus(DEFAULT_PLUS_CONFIG)).toContain(`Plus version: ${PLUS_VERSION}`);
+    expect(PLUS_VERSION).toBe(pkg.version);
   });
 
   it('reports disabled flags', () => {

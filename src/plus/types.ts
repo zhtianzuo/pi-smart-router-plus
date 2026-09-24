@@ -7,7 +7,7 @@
  */
 
 /** Plus layer version, independent of the upstream package version. */
-export const PLUS_VERSION = '0.1.0' as const;
+export const PLUS_VERSION = '0.1.2' as const;
 
 /** Risk levels are independent of task complexity (a one-line prod delete is HIGH). */
 export type RiskLevel = 'low' | 'medium' | 'high';
