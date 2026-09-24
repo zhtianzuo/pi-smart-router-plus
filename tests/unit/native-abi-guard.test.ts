@@ -59,7 +59,7 @@ describe('native ABI guard', () => {
 
     expect(result.status).toBe(0);
     expect(result.stderr).toContain('pi Node not resolved');
-    expect(result.stdout).toContain('OK: this Node');
+    expect(result.stdout).toContain('loads better-sqlite3');
   });
 
   it.skipIf(alternateNode === undefined)(
@@ -82,6 +82,6 @@ describe('native ABI guard', () => {
     const result = runGuard({ piNode: process.execPath, args: ['--print-node'] });
 
     expect(result.status).toBe(0);
-    expect(result.stdout).toMatch(/the first node on PATH: .+ \(ABI \d+\)/);
+    expect(result.stdout).toMatch(/pi's Node: .+ \(ABI \d+\)/);
   });
 });
