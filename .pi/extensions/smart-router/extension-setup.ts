@@ -46,7 +46,11 @@ const PROVIDER_BASE_CONFIG = {
   apiKey: 'local',
   api: 'openai-responses',
 } as const;
-
+// Re-exported so the entry-point can call `pi.registerProvider(...)` synchronously
+// before any async setup, so the Feishu model picker sees `smart-router/auto`
+// as soon as RPC accepts `get_available_models`. Runtime limits are patched in
+// later via `syncRegisteredLimits` once the model runtime is constructed.
+export { PROVIDER_BASE_CONFIG };
 /**
  * Conservative fallback limits for the registered auto entry (SP-092) when no
  * real model has been delegated yet. Once the router selects a model, the entry

@@ -61,7 +61,13 @@ import {
   logRoutingDecision,
   resolveDelegationOptions,
 } from './stream-delegation.js';
-import { createSmartRouterRuntime, registerPlusHooks, wireSmartRouterExtension } from './extension-setup.js';
+import {
+  createSmartRouterRuntime,
+  PROVIDER_BASE_CONFIG,
+  buildAutoModelEntry,
+  registerPlusHooks,
+  wireSmartRouterExtension,
+} from './extension-setup.js';
 import { getRouterStateDbPath } from './utils.js';
 
 export {
@@ -175,6 +181,16 @@ export {
 
 export default async function smartRouterExtension(pi: ExtensionAPI): Promise<void> {
   const cwd = process.cwd();
+  // Synchronously register the provider with default limits so RPC
+  // `get_available_models` snapshots see `smart-router/auto` as soon as RPC
+  // accepts commands. The Feishu model picker would otherwise race against
+  // `createSmartRouterRuntime` and miss it on the first open.
+  // `wireSmartRouterExtension` re-registers with the runtime-backed stream
+  // function once the async setup below completes.
+  pi.registerProvider('smart-router', {
+    ...PROVIDER_BASE_CONFIG,
+    models: [buildAutoModelEntry()],
+  });
   const { runtime, datasetNotify } = await createSmartRouterRuntime(cwd);
   await wireSmartRouterExtension(pi, runtime, datasetNotify);
 }
