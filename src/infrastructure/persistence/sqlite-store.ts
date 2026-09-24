@@ -233,11 +233,40 @@ export interface CreateStoreResult {
 }
 
 /**
+ * True for open failures that say nothing about the on-disk file being damaged:
+ * a missing / ABI-incompatible native binding (`better-sqlite3` loads its
+ * `.node` binary inside `new Database()`), or a transient lock held by another
+ * process. Quarantining the database for these destroys valid routing state
+ * (observed in production: an ABI mismatch under a different Node.js version
+ * renamed a healthy `state.db` to `state.db.corrupt.<ts>`), so the caller falls
+ * back to the memory store and leaves the file untouched instead.
+ */
+function isNonCorruptionOpenFailure(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  const code =
+    typeof error === 'object' && error !== null && 'code' in error
+      ? String((error as { readonly code?: unknown }).code ?? '')
+      : '';
+  return (
+    code === 'MODULE_NOT_FOUND' ||
+    code === 'ERR_MODULE_NOT_FOUND' ||
+    code === 'ERR_DYLIB_NOT_FOUND' ||
+    code === 'ERR_DLOPEN_FAILED' ||
+    /NODE_MODULE_VERSION|was compiled against a different Node\.js version|Could not locate the bindings file|Cannot find module/i.test(
+      message,
+    ) ||
+    /SQLITE_BUSY|database is locked/i.test(message)
+  );
+}
+
+/**
  * Create a persistence store with corrupt-DB recovery.
  *
  * Strategy:
  * 1. Attempt to open the SQLite DB and run migrations.
- * 2. On failure (corrupt/locked): rename the file, try fresh creation.
+ * 2. On failure, quarantine (rename) the file and try fresh creation — except
+ *    for environment failures (native binding load, transient lock), where the
+ *    existing file is kept and the memory store is used instead.
  * 3. If recreation also fails: fall back to MemoryStore.
  *
  * Never throws — the host agent must not crash due to persistence issues.
@@ -250,6 +279,14 @@ export function createResilientStore(options: SqliteStoreOptions): CreateStoreRe
   try {
     return { store: new SqliteStore(options), degraded: false };
   } catch (firstError: unknown) {
+    if (isNonCorruptionOpenFailure(firstError)) {
+      console.warn(
+        'SQLite store unavailable (native module load or transient lock); using memory store and leaving the database file untouched',
+        firstError,
+      );
+      return { store: new MemoryStore(options.models), degraded: true };
+    }
+
     console.warn(
       'SQLite store open failed; attempting corrupt-DB recovery',
       firstError,
