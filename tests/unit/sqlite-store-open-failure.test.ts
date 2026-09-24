@@ -111,8 +111,10 @@ describe('createResilientStore: environment open failures', () => {
     expectDatabaseUntouched(dbPath, contents);
   });
 
-  it('still quarantines the file for genuine corruption', () => {
+  it('still quarantines the file for genuine corruption, including WAL/SHM companions', () => {
     const { dbPath, contents } = seedDatabase();
+    writeFileSync(`${dbPath}-wal`, 'stale-wal');
+    writeFileSync(`${dbPath}-shm`, 'stale-shm');
     failure.error = Object.assign(new Error('file is not a database'), { code: 'SQLITE_NOTADB' });
 
     const { store, degraded } = createResilientStore({ dbPath, models: TEST_MODELS });
@@ -120,7 +122,10 @@ describe('createResilientStore: environment open failures', () => {
     expect(degraded).toBe(true);
     expect(store).toBeInstanceOf(MemoryStore);
     expect(existsSync(dbPath)).toBe(false);
-    expect(readdirSync(tempDir).filter((f) => f.includes('.corrupt.'))).toHaveLength(1);
+    const files = readdirSync(tempDir);
+    expect(files.filter((f) => f.includes('.corrupt.'))).toHaveLength(3);
+    expect(files.some((f) => f.startsWith('state.db.corrupt.') && f.endsWith('-wal'))).toBe(true);
+    expect(files.some((f) => f.startsWith('state.db.corrupt.') && f.endsWith('-shm'))).toBe(true);
     expect(contents).toBe('existing-routing-state');
   });
 });

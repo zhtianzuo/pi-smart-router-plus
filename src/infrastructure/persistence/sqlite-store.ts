@@ -294,6 +294,16 @@ export function createResilientStore(options: SqliteStoreOptions): CreateStoreRe
     try {
       const corruptPath = `${options.dbPath}.corrupt.${Date.now()}`;
       renameSync(options.dbPath, corruptPath);
+      // Move the WAL/SHM companions with the database. Leaving them behind lets
+      // SQLite replay frames of the quarantined database into the freshly
+      // created one, which re-corrupts it on every start.
+      for (const suffix of ['-wal', '-shm'] as const) {
+        try {
+          renameSync(`${options.dbPath}${suffix}`, `${corruptPath}${suffix}`);
+        } catch {
+          // companion file absent — nothing to quarantine
+        }
+      }
     } catch {
       // Rename may fail if the file doesn't exist or permissions issue — continue to recreate attempt
     }
