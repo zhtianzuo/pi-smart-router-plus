@@ -328,11 +328,47 @@ export interface HydraInitDeps {
   readonly createOnnxEmbeddingProvider?: typeof createOnnxEmbeddingProvider;
 }
 
+/**
+ * Env var that opts the gateway out of HuggingFace remote fetches. When set to
+ * '1', the HyDRA matcher's @huggingface/transformers config is pinned to
+ * local-cache-only, so loading an uncached artifact fails closed instead of
+ * stalling a Node-spawned RPC child (docs/07, FEISHU-VS-20260817#1). Off by
+ * default — TUI / interactive users still get updates from upstream.
+ */
+export const SMART_ROUTER_HF_OFFLINE_ENV = 'SMART_ROUTER_HF_OFFLINE';
+
+/** Configure `@huggingface/transformers` env for offline-only operation.
+ * Exposed for testing; normally called by `initHydraMatcher`. */
+export async function configureTransformersOfflineEnv(artifactCachePath: string): Promise<boolean> {
+  if (process.env[SMART_ROUTER_HF_OFFLINE_ENV] !== '1') {
+    return false;
+  }
+  try {
+    const { env } = (await import('@huggingface/transformers')) as {
+      readonly env: {
+        allowRemoteModels?: boolean;
+        cacheDir?: string;
+        localModelPath?: string;
+      };
+    };
+    if (env.allowRemoteModels !== undefined) env.allowRemoteModels = false;
+    if (env.cacheDir !== undefined) env.cacheDir = artifactCachePath;
+    if (env.localModelPath !== undefined) env.localModelPath = artifactCachePath;
+    return true;
+  } catch {
+    // transformers not installed — the createProvider call below will throw
+    // the canonical "Install: npm i @huggingface/transformers" message.
+    return false;
+  }
+}
+
 export async function initHydraMatcher(
   deps?: HydraInitDeps,
 ): Promise<HydraMatcher | undefined> {
   const createProvider = deps?.createOnnxEmbeddingProvider ?? createOnnxEmbeddingProvider;
   const artifactCachePath = DEFAULT_OPERATOR_CONFIG.hydra.artifact_cache_path;
+
+  await configureTransformersOfflineEnv(artifactCachePath);
 
   try {
     const provider = await createProvider(artifactCachePath);
